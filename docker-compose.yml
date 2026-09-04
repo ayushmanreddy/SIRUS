@@ -1,0 +1,29 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - workbench-data:/app/data
+      - ./models:/app/models:ro
+    depends_on:
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.5
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
+  # Start a local, approved LLM runtime on the host or add it as a Compose profile.
+  # Its endpoint is configured through LLM_SERVICE_URL; no hosted API is assumed.
+  # Start a local embedding runtime similarly through EMBEDDING_SERVICE_URL.
+
+volumes:
+  workbench-data:
+  qdrant-data:
