@@ -26,6 +26,8 @@ Invoke-RestMethod http://localhost:8000/system/status
 
 For the foundation-only stack, readiness will report model and embedding services as unavailable until local runtimes are configured. Qdrant is included in Compose and should become ready automatically.
 
+Epic 2 adds `GET /system/preflight`: it reports safe hardware capability details and verifies that approved model files exist locally with matching SHA-256 checksums. It never downloads model weights or reports local filesystem paths.
+
 ## Offline demonstration checklist
 
 1. Place approved model artifacts on the demo machine before disconnecting it.

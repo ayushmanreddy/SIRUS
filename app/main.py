@@ -5,16 +5,25 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from app.audit import AuditStore, configure_logging, log_event
 from app.config import Settings
+from app.hardware import detect_hardware
 from app.health import endpoint_host, readiness
+from app.llm_client import ModelUnavailableError, OllamaClient
+from app.model_artifacts import verify_model_artifacts
+from app.router import TaskType, classify_task, pick_model
 
 settings = Settings()
 audit = AuditStore(settings.database_url)
 logger = configure_logging(settings.log_level)
+llm_client = OllamaClient(
+    settings.llm_service_url,
+    settings.generation_timeout_seconds,
+)
 started_at = time.monotonic()
 
 
@@ -33,6 +42,7 @@ app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=li
 @app.middleware("http")
 async def correlation_middleware(request: Request, call_next):
     correlation_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.correlation_id = correlation_id
     try:
         response = await call_next(request)
     except Exception:
@@ -65,6 +75,7 @@ async def version() -> dict[str, str]:
 @app.get("/system/status", tags=["operations"])
 async def system_status() -> dict[str, object]:
     checks = await readiness(settings)
+    artifacts = verify_model_artifacts(settings)
     return {
         "profile": settings.app_profile,
         "uptime_seconds": round(time.monotonic() - started_at, 1),
@@ -74,4 +85,62 @@ async def system_status() -> dict[str, object]:
             "vector_store": endpoint_host(settings.vector_store_url),
         },
         "checks": [check.__dict__ for check in checks],
+        "model_artifacts": artifacts.model_dump(),
     }
+
+
+@app.get("/system/preflight", tags=["operations"])
+async def preflight() -> dict[str, object]:
+    """Local-demo evidence without exposing model paths, secrets, or host identifiers."""
+    artifacts = verify_model_artifacts(settings)
+    return {
+        "profile": settings.app_profile,
+        "offline_endpoint_policy": "enforced" if settings.app_profile == "offline-demo" else "not active",
+        "hardware": detect_hardware().safe_dict(),
+        "model_artifacts": artifacts.model_dump(),
+    }
+
+
+class GenerateRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=12000)
+    task_type: TaskType | None = None
+    has_image: bool = False
+
+
+class GenerateResponse(BaseModel):
+    task_type: str
+    model: str
+    response: str
+
+
+@app.post("/agent/generate", response_model=GenerateResponse, tags=["agent"])
+async def generate_agent_response(
+    payload: GenerateRequest,
+    request: Request,
+) -> GenerateResponse:
+    task = payload.task_type or classify_task(
+        payload.prompt,
+        has_image=payload.has_image,
+    )
+    model = pick_model(settings, task)
+    correlation_id = request.state.correlation_id
+
+    try:
+        generated_text = await llm_client.generate(model, payload.prompt)
+
+        audit.record(
+            "agent.generation_succeeded",
+            correlation_id,
+            {"task_type": task.value, "model": model},
+        )
+
+        return GenerateResponse(task_type=task.value, model=model, response=generated_text)
+
+    except ModelUnavailableError as error:
+        audit.record(
+            "agent.generation_failed",
+            correlation_id,
+            {"task_type": task.value, "model": model, "reason": "model_unavailable"},
+        )
+
+        raise HTTPException(status_code=502, detail="Local model service is unavailable.") from error

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "artifacts": [
+    {"identifier": "approved-local-llm", "role": "llm", "file": "llm/model.gguf", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "runtime": "llama.cpp", "format": "GGUF", "min_system_ram_gb": 8, "min_vram_gb": 0, "context_length": 4096},
+    {"identifier": "approved-local-embedding-model", "role": "embedding", "file": "embeddings/model.onnx", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "runtime": "onnxruntime", "format": "ONNX", "min_system_ram_gb": 4, "min_vram_gb": 0}
+  ]
+}

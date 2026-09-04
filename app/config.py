@@ -26,7 +26,6 @@ def is_local_or_private_url(value: str) -> bool:
         address = ipaddress.ip_address(host)
         return address.is_loopback or address.is_private
     except ValueError:
-        # Named internal hosts require an explicit deployment DNS policy. Only known Compose names pass here.
         return False
 
 
@@ -38,11 +37,18 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     log_level: str = "INFO"
     database_url: str = "sqlite:///./data/workbench.db"
-    llm_service_url: str = "http://localhost:8081"
-    embedding_service_url: str = "http://localhost:8082"
+    llm_service_url: str = "http://localhost:11434"
+    embedding_service_url: str = "http://localhost:11434"
     vector_store_url: str = "http://localhost:6333"
+
+    reasoning_model: str = "llama3.1:8b"
+    coding_model: str = "qwen2.5-coder:7b"
+    vision_model: str = "llava:7b"
+
     model_artifact_root: str = "./models"
+    model_manifest_path: str = "./models/manifest.json"
     request_timeout_seconds: float = Field(default=3.0, gt=0, le=30)
+    generation_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
 
     @field_validator("llm_service_url", "embedding_service_url", "vector_store_url")
     @classmethod
@@ -64,3 +70,4 @@ class Settings(BaseSettings):
             if invalid:
                 raise ValueError("offline-demo accepts only loopback/private service URLs: " + ", ".join(invalid))
         return self
+    
