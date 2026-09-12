@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 from enum import StrEnum
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+logger = logging.getLogger("sovereign_workbench.config")
 
 
 class AppProfile(StrEnum):
@@ -29,6 +33,16 @@ def is_local_or_private_url(value: str) -> bool:
         return False
 
 
+def check_service_not_external(value: str, setting_name: str) -> str:
+    """Validate that a service URL is local/private; raise ValueError if not."""
+    if not is_local_or_private_url(value):
+        raise ValueError(
+            f"{setting_name} must be a loopback or private network URL "
+            f"when APP_PROFILE=offline-demo. Got: {value}"
+        )
+    return value.rstrip("/")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -37,9 +51,9 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     log_level: str = "INFO"
     database_url: str = "sqlite:///./data/workbench.db"
-    llm_service_url: str = "http://localhost:11434"
-    embedding_service_url: str = "http://localhost:11434"
-    vector_store_url: str = "http://localhost:6333"
+    llm_service_url: str = Field(default="http://localhost:11434", validator=False)
+    embedding_service_url: str = Field(default="http://localhost:11434", validator=False)
+    vector_store_url: str = Field(default="http://localhost:6333", validator=False)
 
     reasoning_model: str = "llama3.1:8b"
     coding_model: str = "qwen2.5-coder:7b"
@@ -68,6 +82,10 @@ class Settings(BaseSettings):
             }
             invalid = [name for name, value in restricted.items() if not is_local_or_private_url(value)]
             if invalid:
-                raise ValueError("offline-demo accepts only loopback/private service URLs: " + ", ".join(invalid))
+                raise ValueError(
+                    "offline-demo accepts only loopback/private service URLs: "
+                    + ", ".join(invalid)
+                    + ". Set APP_PROFILE=development or demo for external endpoints."
+                )
         return self
     

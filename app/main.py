@@ -9,11 +9,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.ai.ollama_client import OllamaClient, ModelUnavailableError
 from app.audit import AuditStore, configure_logging, log_event
 from app.config import Settings
 from app.hardware import detect_hardware
 from app.health import endpoint_host, readiness
-from app.llm_client import ModelUnavailableError, OllamaClient
 from app.model_artifacts import verify_model_artifacts
 from app.router import TaskType, classify_task, pick_model
 
