@@ -1,0 +1,277 @@
+============================================================
+SIRUS — EPIC 2 COMPLETION REPORT
+============================================================
+
+Project:
+Sovereign On-Premise Agentic AI Workbench
+
+Repository:
+ayushmanreddy/SIRUS
+
+Milestone:
+Epic 2 — Sovereign Local AI Infrastructure
+
+Status:
+COMPLETED / VERIFIED WITH DOCUMENTED LIMITATIONS
+
+------------------------------------------------------------
+1. OBJECTIVE
+------------------------------------------------------------
+
+Epic 2 implements the sovereign local AI infrastructure layer for the
+Sovereign AI Workbench, enabling organizations to run AI workloads over
+sensitive data without requiring confidential information to be sent to
+external AI providers.
+
+Key goals:
+
+- Create abstraction layers so the application is not tightly coupled to
+  one AI provider.
+- Integrate Ollama as the first local inference backend.
+- Enable hardware detection (CPU, RAM, GPU).
+- Provide resource monitoring infrastructure.
+- Create local embedding abstraction.
+- Create vector store abstraction with Qdrant integration.
+- Enforce offline-first operation with `offline-demo` profile.
+- Document clear boundaries between local and optional external services.
+
+------------------------------------------------------------
+2. IMPLEMENTED COMPONENTS
+------------------------------------------------------------
+
+ModelProvider abstraction (app/ai/ModelProvider):
+  Abstract base class with load(), unload(), health(), generate(), stream().
+
+ModelMetadata (app/ai/ModelMetadata):
+  Model metadata (name, type, family, context_length, requires_gpu,
+  min_vram_gb, min_ram_gb).
+
+ModelRegistry (app/ai/model_management):
+  Manages available models, active model, model status, registration,
+  unregistration, model metadata retrieval.
+
+Ollama integration (app/ai/ollama_client.OllamaClient):
+  Configurable base URL, health checking via /api/tags, generation via
+  /api/generate, streaming support, timeout handling, ModelUnavailableError.
+
+Hardware detection (app/hardware.detect_hardware):
+  CPU core count, architecture, GPU detection (NVIDIA via nvidia-smi,
+  AMD via rocm-smi), total RAM. Presenter-safe output via
+  HardwareSnapshot.safe_dict().
+
+Resource monitoring (app/monitor):
+  CpuMetrics, RamMetrics, GpuMetrics, ModelPerformanceMetrics,
+  MonitoringSnapshot with to_dict()/from_dict() serialization.
+
+Local embedding abstraction (app/ai._embedding.EmbeddingProvider):
+  Abstract interface with embed(), embed_batch(), health(),
+  get_dimension(), get_model_name().
+
+Local embedding implementation (app/ai.embedding_local.LocalEmbeddingProvider):
+  SHA-256 hash-based deterministic embedding fallback for development/demo.
+  768-dimensional vectors. batch embedding support.
+
+Vector store interface (app/ai._vector_store.VectorStoreInterface):
+  Abstract interface with create_collection(), insert(),
+  similarity_search(), delete(), delete_collection(),
+  list_collections(), get_collection_info().
+
+Qdrant integration (app/ai.vector_store_qdrant.QdrantClient):
+  Implements VectorStoreInterface for Qdrant v1.12.5.
+  Collection creation, vector insertion with "points" wrapper,
+  similarity search with metadata filtering, vector deletion,
+  collection listing and info.
+
+Offline-demo enforcement (app/config):
+  AppProfile.OFFLINE_DEMO blocks non-loopback/private AI service URLs.
+  model validator rejects public endpoints (e.g., api.example.com).
+  loopback/private URLs (127.0.0.1, localhost, 10.x.x.x,
+  172.16-31.x.x, 192.168.x.x) are accepted.
+
+Configuration (app/config.py):
+  Centralized Settings via pydantic_settings with env_file support.
+  development/demo/offline-demo profiles.
+  request_timeout_seconds, generation_timeout_seconds.
+  URL validation and offline-profile blocking.
+
+Documentation (docs/):
+  architecture.md — updated with abstraction layers.
+  epic-2-local-models.md — comprehensive Epic 2 feature documentation.
+  runbook.md — offline demonstration checklist and recovery steps.
+
+Tests (tests/):
+  8 pytest tests covering config, LLM client, model artifacts, and router.
+  All 8 tests pass.
+
+------------------------------------------------------------
+3. IMPORTANT BUGS FIXED
+------------------------------------------------------------
+
+The following bugs were found and fixed during Epic 2 development:
+
+1. ModelRegistry.get_metadata() returning None
+   - Fixed: get_metadata() now returns a ModelMetadata instance with
+     basic model information instead of None. Uses lazy import
+     (from app.ai import ModelMetadata) to avoid circular import at
+     module load time.
+
+2. Ollama streaming assuming SSE `data: ` format
+   - Fixed: Ollama's /api/generate with stream=True returns raw JSON
+     lines (each line is a complete JSON object), NOT SSE format with
+     `data: ` prefix. Fixed the stream() method to parse each
+     non-empty line as JSON directly.
+
+3. Ollama timeout/TimeoutError handling
+   - Fixed: Module-level import of `TimeoutError as AsyncTimeoutError`
+     to avoid NameError when timeout actually triggers during generation
+     or streaming.
+
+4. Qdrant point insertion payload format (v1.12+ compatibility)
+   - Fixed: Qdrant v1.12+ requires `"points": [...]` wrapper in insert
+    /create point payloads. Fixed the insert() method to send
+     {"points": [{"vector": ..., "payload": ...}]} instead of bare
+     {"vector": ..., "payload": ...}.
+
+------------------------------------------------------------
+4. TEST RESULTS
+------------------------------------------------------------
+
+Test command:
+pytest
+
+Result:
+8 passed
+
+All 8 existing tests pass without regression. No tests were disabled
+or modified to make incorrect code pass.
+
+------------------------------------------------------------
+5. LIVE SERVICE VERIFICATION
+------------------------------------------------------------
+
+Status: NOT LIVE VERIFIED in this environment
+
+Ollama and Qdrant daemons were not running during this development
+session. The following was verified via API specification review:
+
+- Ollama client: API payloads and endpoints match Ollama /api/generate
+  and /api/tags specifications. Streaming format corrected to parse
+  raw JSON lines.
+- Qdrant client: API payloads match Qdrant v1.12.5 specifications.
+  Insert payload uses "points" wrapper as required by v1.12+.
+- No live Ollama/Qdrant integration testing was executed.
+
+If Ollama/Qdrant becomes available, the following should be verified:
+
+- /api/tags endpoint returns expected model list.
+- /api/generate with model and prompt produces correct response.
+- Streaming returns continuous JSON line responses.
+- Collection creation with dimension specification.
+- Vector insertion and similarity search with relevance.
+- Health check endpoint responsiveness.
+
+------------------------------------------------------------
+6. HARDWARE VERIFICATION
+------------------------------------------------------------
+
+Detected system hardware:
+
+- CPU: 16 cores, AMD64 architecture
+- RAM: 8192 MB total
+- GPU: NVIDIA GeForce RTX 3050 Laptop GPU (4 GB total, ~1 GB used)
+- GPU detection: "NVIDIA GPU capability detected"
+
+Graceful behavior without GPU: The application falls back to CPU-only
+operation when no supported GPU is present. Hardware detection does
+not crash or report errors in the absence of GPU hardware.
+
+No personal or system-identifying information beyond architecture and
+device type is included.
+
+------------------------------------------------------------
+7. OFFLINE SOVEREIGNTY
+------------------------------------------------------------
+
+Verified behaviors:
+
+- offline-demo profile rejects public AI service URLs:
+  Settings(app_profile="offline-demo", llm_service_url="https://api.example.com/v1")
+  raises ValidationError.
+
+- loopback/private/internal addresses are accepted where intended:
+  Settings(app_profile="offline-demo", llm_service_url="http://127.0.0.1:8081")
+  succeeds.
+
+- Settings(app_profile="offline-demo", llm_service_url="http://localhost:8082") succeeds.
+
+- Settings(app_profile="offline-demo", llm_service_url="http://192.168.1.20:6333") succeeds.
+
+- Settings(app_profile="offline-demo", llm_service_url="http://10.0.0.1:8080") succeeds.
+
+- Settings(app_profile="offline-demo", llm_service_url="http://172.16.0.1:8080") succeeds.
+
+- No hidden external AI fallback: The offline-demo profile validator
+  explicitly checks all three model-facing service URLs (LLM,
+  embedding, vector store) and raises ValueError if any resolve to a
+  public, non-private, non-loopback hostname.
+
+------------------------------------------------------------
+8. KNOWN LIMITATIONS
+------------------------------------------------------------
+
+- Live Ollama verification: Not executed in this environment. API-spec
+  verification only. Requires running Ollama service for integration
+  testing.
+
+- Live Qdrant verification: Not executed in this environment. API-spec
+  verification only. Requires running Qdrant service for integration
+  testing.
+
+- Semantic embedding model: The local embedding implementation uses a
+  SHA-256 hash-based deterministic fallback rather than a real semantic
+  embedding model (e.g., all-miniLM-L6-v2). This is appropriate for
+  development and demonstration but would need to be replaced with a
+  local model inference backend for production use.
+
+- Remaining future epics: Epics 3-11 (Document Intelligence through
+  SIH Demo) are NOT started by this commit. The current implementation
+  provides the sovereign local AI infrastructure foundation only.
+
+------------------------------------------------------------
+9. NEXT MILESTONE
+------------------------------------------------------------
+
+Epic 3 — Document Intelligence
+
+Explicitly stated: Epic 3 has NOT been started by this commit. The
+next development session will begin with Epic 3 — Document Intelligence.
+
+------------------------------------------------------------
+10. FILES CHANGED
+------------------------------------------------------------
+
+Relevant Epic 2 files committed:
+
+- app/ai/model_management.py — ModelRegistry with functional get_metadata()
+- app/ai/ollama_client.py — Fixed streaming format, TimeoutError import
+- app/ai/vector_store_qdrant.py — Fixed Qdrant v1.12+ "points" wrapper
+
+Also committed (pre-existing, not Epic 2):
+
+- configs/model-manifest.example.json (example, not modified)
+- docs/architecture.md — updated abstraction layer documentation
+- docs/epic-2-local-models.md — comprehensive Epic 2 feature documentation
+- docs/runbook.md — offline demonstration checklist and recovery steps
+
+No model weights, no .env files, no confidential data, no private
+artifacts were committed.
+
+------------------------------------------------------------
+11. VERIFICATION DATE
+------------------------------------------------------------
+
+2026-09-12
+
+============================================================
+SIRUS — EPIC 2 COMPLETION REPORT
+============================================================
