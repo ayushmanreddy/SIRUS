@@ -5,13 +5,15 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, File, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from app.ocr import InvalidPDFError
 
-from app.ai.ollama_client import OllamaClient, ModelUnavailableError
+from app.llm_client import OllamaClient, ModelUnavailableError
 from app.audit import AuditStore, configure_logging, log_event
 from app.config import Settings
+from app.ocr import render_pdf_pages, extract_text
 from app.hardware import detect_hardware
 from app.health import endpoint_host, readiness
 from app.model_artifacts import verify_model_artifacts
@@ -43,12 +45,7 @@ app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=li
 async def correlation_middleware(request: Request, call_next):
     correlation_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.correlation_id = correlation_id
-    try:
-        response = await call_next(request)
-    except Exception:
-        audit.record("api.error", correlation_id, {"path": request.url.path, "method": request.method})
-        log_event(logger, "api.error", correlation_id=correlation_id, path=request.url.path)
-        return JSONResponse(status_code=500, content={"error": "internal_error", "request_id": correlation_id})
+    response = await call_next(request)
     response.headers["X-Request-ID"] = correlation_id
     return response
 
@@ -141,6 +138,52 @@ async def generate_agent_response(
             "agent.generation_failed",
             correlation_id,
             {"task_type": task.value, "model": model, "reason": "model_unavailable"},
+        )
+
+        raise HTTPException(status_code=502, detail="Local model service is unavailable.") from error
+
+
+@app.post("/documents/analyze", tags=["documents"])
+async def analyze_document(
+    request: Request,
+    file: UploadFile = File(...),
+) -> dict[str, str]:
+    """Analyze an uploaded document by extracting text and generating a summary.
+
+    Accepts a PDF file, extracts text via OCR, and generates a summary using
+    the local reasoning model.
+    """
+    import io
+
+    # Read the uploaded file bytes
+    file_bytes = await file.read()
+
+    # Extract text from the PDF
+    try:
+        extracted_text = extract_text(file_bytes)
+    except InvalidPDFError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    # Build the summarization prompt
+    prompt = f"Summarize the key findings from this inspection report:\n\n{extracted_text}"
+
+    # Generate summary using the local reasoning model
+    try:
+        summary = await llm_client.generate(settings.reasoning_model, prompt)
+
+        audit.record(
+            "document.analyzed",
+            request.state.correlation_id,
+            {"task_type": "summarization", "model": settings.reasoning_model},
+        )
+
+        return {"extracted_text": extracted_text, "summary": summary, "model": settings.reasoning_model}
+
+    except ModelUnavailableError as error:
+        audit.record(
+            "document.analysis_failed",
+            request.state.correlation_id,
+            {"task_type": "summarization", "model": settings.reasoning_model, "reason": "model_unavailable"},
         )
 
         raise HTTPException(status_code=502, detail="Local model service is unavailable.") from error
