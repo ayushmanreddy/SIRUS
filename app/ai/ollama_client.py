@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from asyncio import timeout as async_timeout
+from asyncio import timeout as async_timeout, TimeoutError as AsyncTimeoutError
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 import httpx
@@ -164,16 +164,15 @@ class OllamaClient:
                 async with client.stream("POST", "/api/generate", json=payload) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            chunk_data = line[6:]
-                            if chunk_data.strip():
-                                try:
-                                    chunk = json.loads(chunk_data)
-                                    if "response" in chunk:
-                                        yield chunk["response"]
-                                except json.JSONDecodeError:
-                                    continue
-        except (httpx.HTTPError, asyncio.TimeoutError, json.JSONDecodeError) as error:
+                        line = line.strip()
+                        if line:
+                            try:
+                                chunk = json.loads(line)
+                                if "response" in chunk:
+                                    yield chunk["response"]
+                            except json.JSONDecodeError:
+                                continue
+        except (httpx.HTTPError, AsyncTimeoutError, json.JSONDecodeError) as error:
             logger.error("Ollama streaming failed: %s", error, extra={"model": model})
             raise ModelUnavailableError(
                 "Local Ollama service is unavailable during streaming."

@@ -64,4 +64,14 @@ class ModelRegistry:
     def get_metadata(self, name: str) -> Optional[object]:
         """Get metadata for a specific model."""
         from app.ai import ModelMetadata  # lazy import to avoid circular dependency
-        return None
+        if name not in self._model_status:
+            return None
+        return ModelMetadata(
+            name=name,
+            model_type="llm",
+            family=None,
+            context_length=None,
+            requires_gpu=False,
+            min_vram_gb=0.0,
+            min_ram_gb=0.0,
+        )

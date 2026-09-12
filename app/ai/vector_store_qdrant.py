@@ -79,8 +79,12 @@ class QdrantClient(VectorStoreInterface):
         try:
             client = await self._get_client()
             payload = {
-                "vector": vector,
-                "payload": metadata.to_dict(),
+                "points": [
+                    {
+                        "vector": vector,
+                        "payload": metadata.to_dict(),
+                    }
+                ]
             }
             await client.post(f"/collections/{collection_name}/points", json=payload)
             logger.info("Qdrant vector inserted to collection %s", collection_name)
