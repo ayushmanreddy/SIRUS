@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from app.ai.model_management import ModelRegistry, ModelStatus
 from app.ai._embedding import EmbeddingProvider
 from app.ai._vector_store import VectorStoreInterface, VectorStoreMetadata, VectorStoreSearchResult
-from app.ai.ollama_client import OllamaClient, ModelUnavailableError
+from app.llm_client import OllamaClient, ModelUnavailableError
 
 logger = logging.getLogger("sovereign_workbench.ai")
 

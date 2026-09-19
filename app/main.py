@@ -12,6 +12,7 @@ from app.ocr import InvalidPDFError
 
 from app.llm_client import OllamaClient, ModelUnavailableError
 from app.audit import AuditStore, configure_logging, log_event
+from app.sandbox import run_python
 from app.config import Settings
 from app.ocr import render_pdf_pages, extract_text
 from app.hardware import detect_hardware
@@ -104,6 +105,17 @@ class GenerateRequest(BaseModel):
     has_image: bool = False
 
 
+class CodeExecutionRequest(BaseModel):
+    code: str = Field(max_length=5000)
+
+
+class CodeExecutionResponse(BaseModel):
+    stdout: str
+    stderr: str
+    exit_code: int | None
+    timed_out: bool
+
+
 class GenerateResponse(BaseModel):
     task_type: str
     model: str
@@ -141,6 +153,23 @@ async def generate_agent_response(
         )
 
         raise HTTPException(status_code=502, detail="Local model service is unavailable.") from error
+
+
+@app.post("/agent/execute_code", response_model=CodeExecutionResponse, tags=["agent"])
+async def execute_code(request: Request, payload: CodeExecutionRequest) -> CodeExecutionResponse:
+    correlation_id = request.state.correlation_id
+    result = run_python(payload.code)
+    audit.record(
+        "code_execution",
+        correlation_id,
+        {"task_type": "code_execution", "exit_code": result["exit_code"], "timed_out": result["timed_out"]},
+    )
+    return CodeExecutionResponse(
+        stdout=result["stdout"],
+        stderr=result["stderr"],
+        exit_code=result["exit_code"],
+        timed_out=result["timed_out"],
+    )
 
 
 @app.post("/documents/analyze", tags=["documents"])
