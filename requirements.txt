@@ -7,3 +7,5 @@ pytest>=8.4,<10
 pymupdf==1.28.2
 easyocr==1.7.2
 pytest-asyncio==1.4.1.post1
+python-multipart
+
