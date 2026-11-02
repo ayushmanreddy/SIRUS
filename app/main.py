@@ -21,6 +21,7 @@ from app.model_artifacts import verify_model_artifacts
 from app.router import TaskType, classify_task, pick_model
 from app.rag.chunking import chunk_text
 from app.ai.embedding_ollama import OllamaEmbeddingProvider
+from app.ai._vector_store import VectorStoreMetadata
 
 settings = Settings()
 audit = AuditStore(settings.database_url)
@@ -292,7 +293,14 @@ async def ingest_document(
     stored_chunks: list[dict] = []
     for chunk_idx, (chunk_text, page_number, chunk_index) in enumerate(chunks_data):
         embedding = await embedding_provider.embed(chunk_text)
-        metadata = type("Meta", (), {"page_number": page_number, "chunk_index": chunk_index, "content": chunk_text})()
+        metadata = VectorStoreMetadata(
+            id=f"{document_id}:{page_number}:{chunk_index}",
+            content=chunk_text,
+            source_document=file.filename or document_id,
+            page_number=page_number,
+            chunk_index=chunk_index,
+            document_id=document_id,
+        )
         await qdrant.insert(
             collection_name=collection_name,
             vector=embedding,
@@ -319,10 +327,8 @@ async def query_documents(
     # Embed the question
     question_embedding = await embedding_provider.embed(payload.question)
 
-    # Determine collection name
-    collection_name = payload.document_id if payload.document_id else "documents"
-
-    # Similarity search
+    # All ingested documents share one collection; document_id narrows the search.
+    collection_name = "documents"
     filter_metadata = {}
     if payload.document_id:
         filter_metadata["document_id"] = payload.document_id

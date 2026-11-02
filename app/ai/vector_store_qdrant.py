@@ -137,18 +137,18 @@ class QdrantClient(VectorStoreInterface):
                 "with_payload": True,
             }
             if filter_metadata:
-                # Build Qdrant filter format
-                filter_obj: Dict[str, Any] = {}
-                for key, value in filter_metadata.items():
-                    if isinstance(value, str):
-                        filter_obj[key] = {"match": {"value": value}}
-                    elif isinstance(value, bool):
-                        filter_obj[key] = {"match": {"value": str(value).lower()}}
-                    elif isinstance(value, (int, float)):
-                        filter_obj[key] = {"match": {"value": value}}
-                    else:
-                        filter_obj[key] = {"match": {"value": str(value)}}
-                payload["filter"] = filter_obj
+                # Qdrant filters use a must list of field conditions.
+                payload["filter"] = {
+                    "must": [
+                        {
+                            "key": key,
+                            "match": {
+                                "value": value if isinstance(value, (str, int, float, bool)) else str(value)
+                            },
+                        }
+                        for key, value in filter_metadata.items()
+                    ]
+                }
 
             response = await client.post(
                 f"/collections/{collection_name}/points/search",
