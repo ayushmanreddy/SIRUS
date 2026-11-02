@@ -4,13 +4,15 @@ An SIH internal-competition MVP for confidential-document AI workflows that keep
 
 ## What works in this foundation
 
-- FastAPI service with liveness, readiness, version, and presenter-safe system status endpoints.
-- Typed environment configuration with `development`, `demo`, and `offline-demo` profiles.
-- Local SQLite audit trail and structured JSON logging with secret/content redaction.
-- Docker Compose services for the API, Qdrant vector store, and local-model/embedding service slots.
-- A local-only endpoint policy: `offline-demo` refuses public AI service URLs.
-
-The document ingestion, RAG, agent workflow, authentication, and web UI are planned follow-on epics. This repository does not claim them as implemented.
+- FastAPI service with liveness, readiness, version, and presenter-safe system status endpoints
+- Typed environment configuration with `development`, `demo`, and `offline-demo` profiles
+- Local SQLite audit trail and structured JSON logging with secret/content redaction
+- Docker Compose services for the API, Qdrant vector store, and local-model/embedding service slots
+- A local-only endpoint policy: `offline-demo` refuses public AI service URLs
+- **Document ingestion RAG pipeline**: `/documents/ingest` (PDF upload → OCR → chunking → embedding → Qdrant store) and `/documents/query` (similarity search → LLM answer with source citations)
+- Fixed-size character chunking with overlap preserving page numbers and chunk indices
+- Ollama-backed embedding provider via `/api/embeddings`
+- Qdrant client with PUT/points?wait=true for insert and filter-based search
 
 ## Quick start
 
@@ -22,6 +24,8 @@ The document ingestion, RAG, agent workflow, authentication, and web UI are plan
 Invoke-RestMethod http://localhost:8000/health/live
 Invoke-RestMethod http://localhost:8000/health/ready
 Invoke-RestMethod http://localhost:8000/system/status
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/documents/ingest -Body @{file=@"/path/to/doc.pdf"} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/documents/query -Body @{question="What is the key finding?"} | ConvertTo-Json
 ```
 
 For the foundation-only stack, readiness will report model and embedding services as unavailable until local runtimes are configured. Qdrant is included in Compose and should become ready automatically.

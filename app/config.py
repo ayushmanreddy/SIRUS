@@ -47,11 +47,14 @@ class Settings(BaseSettings):
     reasoning_model: str = "llama3.1:8b"
     coding_model: str = "qwen2.5-coder:7b"
     vision_model: str = "llava:7b"
+    embedding_model: str = "nomic-embed-text"
 
     model_artifact_root: str = "./models"
     model_manifest_path: str = "./models/manifest.json"
     request_timeout_seconds: float = Field(default=3.0, gt=0, le=30)
     generation_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
+    max_upload_mb: int = Field(default=10, gt=0)
+    max_page_count: int = Field(default=100, gt=0)
 
     @field_validator("llm_service_url", "embedding_service_url", "vector_store_url")
     @classmethod
