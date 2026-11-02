@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -27,14 +28,19 @@ class QdrantClient(VectorStoreInterface):
         self,
         base_url: str = "http://localhost:6333",
         timeout: float = 10.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
+        self._transport = transport
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+            if self._transport:
+                self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout, transport=self._transport)
+            else:
+                self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
         return self._client
 
     async def health(self) -> Dict[str, Any]:
@@ -55,7 +61,11 @@ class QdrantClient(VectorStoreInterface):
         dimension: int,
         metadata_schema: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Create a new vector collection in Qdrant."""
+        """Create a new vector collection in Qdrant.
+
+        If the collection already exists, this is treated as success
+        (409 Conflict is ignored).
+        """
         try:
             client = await self._get_client()
             payload: Dict[str, Any] = {
@@ -65,6 +75,12 @@ class QdrantClient(VectorStoreInterface):
                 payload["metadata_schema"] = metadata_schema
             await client.put(f"/collections/{collection_name}", json=payload)
             logger.info("Qdrant collection created: %s", collection_name)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 409:
+                logger.info("Qdrant collection already exists: %s", collection_name)
+                return
+            logger.error("Failed to create Qdrant collection: %s", error)
+            raise
         except (httpx.HTTPError, ConnectionError) as error:
             logger.error("Failed to create Qdrant collection: %s", error)
             raise
@@ -75,20 +91,29 @@ class QdrantClient(VectorStoreInterface):
         vector: List[float],
         metadata: VectorStoreMetadata,
     ) -> str:
-        """Insert a vector into a Qdrant collection."""
+        """Insert a vector into a Qdrant collection.
+
+        Uses PUT /collections/{name}/points?wait=true with explicit point IDs (UUID).
+        Returns the vector ID.
+        """
         try:
             client = await self._get_client()
+            point_id = str(uuid.uuid4())
             payload = {
                 "points": [
                     {
+                        "id": point_id,
                         "vector": vector,
                         "payload": metadata.to_dict(),
                     }
                 ]
             }
-            await client.post(f"/collections/{collection_name}/points", json=payload)
+            await client.put(f"/collections/{collection_name}/points", json=payload, params={"wait": "true"})
             logger.info("Qdrant vector inserted to collection %s", collection_name)
-            return metadata.id
+            return point_id
+        except httpx.HTTPStatusError as error:
+            logger.error("Failed to insert Qdrant vector: %s", error)
+            raise
         except (httpx.HTTPError, ConnectionError) as error:
             logger.error("Failed to insert Qdrant vector: %s", error)
             raise
@@ -100,7 +125,10 @@ class QdrantClient(VectorStoreInterface):
         top_k: int = 4,
         filter_metadata: Optional[Dict[str, Any]] = None,
     ) -> List[VectorStoreSearchResult]:
-        """Perform similarity search over Qdrant vectors."""
+        """Perform similarity search over Qdrant vectors.
+
+        Uses Qdrant filter format with "key:value" or "key{op:value}" expressions.
+        """
         try:
             client = await self._get_client()
             payload: Dict[str, Any] = {
@@ -109,9 +137,18 @@ class QdrantClient(VectorStoreInterface):
                 "with_payload": True,
             }
             if filter_metadata:
-                # Build a Qdrant filter from the metadata dict
-                # Simplified: just pass as query parameters
-                payload["metadata_filter"] = filter_metadata
+                # Qdrant filters use a must list of field conditions.
+                payload["filter"] = {
+                    "must": [
+                        {
+                            "key": key,
+                            "match": {
+                                "value": value if isinstance(value, (str, int, float, bool)) else str(value)
+                            },
+                        }
+                        for key, value in filter_metadata.items()
+                    ]
+                }
 
             response = await client.post(
                 f"/collections/{collection_name}/points/search",
@@ -133,6 +170,9 @@ class QdrantClient(VectorStoreInterface):
                 )
                 results.append(VectorStoreSearchResult(vector_id=point.get("id", ""), score=score, metadata=metadata))
             return results
+        except httpx.HTTPStatusError as error:
+            logger.error("Qdrant similarity search failed: %s", error)
+            raise
         except (httpx.HTTPError, ConnectionError) as error:
             logger.error("Qdrant similarity search failed: %s", error)
             raise

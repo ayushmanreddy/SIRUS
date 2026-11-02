@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import logging
-
-import easyocr
-import numpy as np
+from typing import Optional
 
 logger = logging.getLogger("sovereign_workbench.ocr")
 
-_reader = easyocr.Reader(["en"], gpu=True)  # loaded once at import time
+_reader: Optional["easyocr.Reader"] = None
+
+
+def _get_reader() -> "easyocr.Reader":
+    global _reader
+    if _reader is None:
+        import easyocr
+        import torch
+        gpu = torch.cuda.is_available()
+        logger.info("Initializing easyocr.Reader with gpu=%s", gpu)
+        _reader = easyocr.Reader(["en"], gpu=gpu)
+    return _reader
 
 
 class InvalidPDFError(Exception):
@@ -67,10 +76,12 @@ def extract_text(pdf_bytes: bytes) -> str:
         page = document[page_num]
         pixmap = page.get_pixmap()
         image_bytes = pixmap.tobytes("png")
-        image_np = np.frombuffer(image_bytes, dtype=np.uint8)
         import cv2
+        import numpy as np
+        image_np = np.frombuffer(image_bytes, dtype=np.uint8)
         image_bgr = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
-        results = _reader.readtext(image_bgr, detail=0)
+        from app.ocr import _get_reader
+        results = _get_reader().readtext(image_bgr, detail=0)
         page_text = "\n".join(results)
         all_text.append(page_text)
     document.close()
