@@ -9,7 +9,9 @@ services:
       - ./models:/app/models:ro
     depends_on:
       qdrant:
-        condition: service_started
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
 
   qdrant:
@@ -18,12 +20,54 @@ services:
       - "6333:6333"
     volumes:
       - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
-  # Start a local, approved LLM runtime on the host or add it as a Compose profile.
-  # Its endpoint is configured through LLM_SERVICE_URL; no hosted API is assumed.
-  # Start a local embedding runtime similarly through EMBEDDING_SERVICE_URL.
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    # GPU example (NVIDIA): uncomment and install nvidia-container-toolkit.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # One-shot helper: docker compose --profile setup run --rm ollama-models
+  # Pulling a model is not automatic just because the Ollama container starts.
+  ollama-models:
+    image: ollama/ollama:latest
+    profiles: ["setup"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        ollama pull ${LLM_MODEL:-llama3.1:8b} &&
+        ollama pull ${EMBEDDING_MODEL:-nomic-embed-text}
+    restart: "no"
 
 volumes:
   workbench-data:
   qdrant-data:
+  ollama-data:

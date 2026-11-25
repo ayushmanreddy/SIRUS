@@ -1,127 +1,199 @@
+from __future__ import annotations
+
+import fitz
 import pytest
-from fastapi.testclient import TestClient
 
-import app.main as app_module
-import app.ocr as ocr_mod
-from app.ai._vector_store import VectorStoreMetadata, VectorStoreSearchResult
-from app.ai.vector_store_qdrant import QdrantClient
-from app.config import Settings
-from app.ocr import InvalidPDFError
-
-client = TestClient(app_module.app)
+from app.rag.prompts import NO_EVIDENCE_ANSWER
 
 
-def test_documents_ingest_oversize_upload():
-    """/documents/ingest rejects a file larger than max_upload_mb with 413."""
-    max_size = Settings().max_upload_mb * 1024 * 1024
-    large_bytes = b"x" * (max_size + 1)
-    response = client.post(
+def _upload(client, filename: str, data: bytes, content_type: str = "text/plain"):
+    return client.post(
         "/documents/ingest",
-        files={"file": ("large.pdf", large_bytes, "application/pdf")},
+        files={"file": (filename, data, content_type)},
     )
+
+
+def test_ingest_and_duplicate_upload(client):
+    response = _upload(client, "handbook.txt", b"Paris is the capital of France.")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["duplicate"] is False
+    assert payload["chunk_count"] >= 1
+    assert payload["chunks"][0]["chunk_id"]
+
+    duplicate = _upload(client, "renamed.txt", b"Paris is the capital of France.")
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
+    assert duplicate.json()["document_id"] == payload["document_id"]
+
+
+def test_ingest_rejects_oversize_upload(client, container):
+    container.settings.max_upload_mb = 1
+    response = _upload(client, "large.txt", b"x" * (1024 * 1024 + 1))
     assert response.status_code == 413
 
 
-def test_documents_ingest_empty_ocr_text_422(monkeypatch):
-    """/documents/ingest returns 422 when OCR produces no text."""
-    import fitz
-    from unittest.mock import MagicMock
+def test_ingest_rejects_unsupported_type(client):
+    response = _upload(client, "image.png", b"not an image", "image/png")
+    assert response.status_code == 415
 
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((72, 72), "Test", fontsize=18)
-    pdf_bytes = doc.write()
-    doc.close()
 
-    mock_reader = MagicMock()
-    mock_reader.readtext.return_value = []
-    monkeypatch.setattr(ocr_mod, "_get_reader", lambda: mock_reader)
-
-    response = client.post(
-        "/documents/ingest",
-        files={"file": ("test.pdf", pdf_bytes, "application/pdf")},
-    )
+def test_ingest_rejects_empty_file(client):
+    response = _upload(client, "empty.txt", b"")
     assert response.status_code == 422
 
 
-def _patch_query_dependencies(monkeypatch, search_results, answer):
-    async def fake_embed(text):
-        return [0.1] * 768
-
-    async def fake_search(self, *args, **kwargs):
-        return search_results
-
-    async def fake_generate(model, prompt):
-        return answer
-
-    monkeypatch.setattr(app_module.embedding_provider, "embed", fake_embed)
-    monkeypatch.setattr(QdrantClient, "similarity_search", fake_search)
-    monkeypatch.setattr(app_module.llm_client, "generate", fake_generate)
+def test_ingest_rejects_corrupted_pdf(client):
+    response = _upload(client, "broken.pdf", b"not a pdf", "application/pdf")
+    assert response.status_code == 422
 
 
-def test_documents_query_no_hits_returns_not_found(monkeypatch):
-    """/documents/query with no search hits says the answer is not in the document."""
-    _patch_query_dependencies(monkeypatch, [], "not found in the document")
-
-    response = client.post("/documents/query", json={"question": "What is the key finding?"})
+def test_ingest_native_text_pdf(client):
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "SIRUS PDF pipeline extracts this native text correctly.", fontsize=14)
+    data = document.write()
+    document.close()
+    response = _upload(client, "report.pdf", data, "application/pdf")
     assert response.status_code == 200
-    data = response.json()
-    assert data["answer"] == "not found in the document"
-    assert data["sources"] == []
+    assert response.json()["page_count"] == 1
 
 
-def test_documents_query_with_results(monkeypatch):
-    """/documents/query returns an answer and its sources when hits exist."""
-    metadata = VectorStoreMetadata(
-        id="doc-1",
-        content="Key finding about AI",
-        source_document="test.pdf",
-        page_number=1,
-        chunk_index=0,
-    )
-    hit = VectorStoreSearchResult(vector_id="id-1", score=0.95, metadata=metadata)
-    _patch_query_dependencies(monkeypatch, [hit], "The key finding is about AI.")
+def test_upload_filename_is_sanitized(client):
+    response = _upload(client, "../../evil.txt", b"Safe content for traversal test.")
+    assert response.status_code == 200
+    assert response.json()["filename"] == "evil.txt"
 
+
+def test_list_and_get_document(client):
+    created = _upload(client, "policy.txt", b"Policy document content for listing.").json()
+    listing = client.get("/documents")
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 1
+    assert listing.json()["documents"][0]["document_id"] == created["document_id"]
+
+    detail = client.get(f"/documents/{created['document_id']}")
+    assert detail.status_code == 200
+    assert detail.json()["filename"] == "policy.txt"
+    assert detail.json()["chunks"]
+
+
+def test_get_missing_document_returns_404(client):
+    response = client.get("/documents/unknown")
+    assert response.status_code == 404
+
+
+def test_query_returns_answer_and_traceable_sources(client):
+    created = _upload(
+        client,
+        "france.txt",
+        b"Paris is the capital of France. The Eiffel Tower is in Paris.",
+    ).json()
     response = client.post(
-        "/documents/query", json={"question": "What is the key finding?", "top_k": 4}
+        "/documents/query",
+        json={"question": "What is the capital of France?", "top_k": 3},
     )
     assert response.status_code == 200
-    data = response.json()
-    assert "answer" in data
-    assert len(data["sources"]) > 0
-    source = data["sources"][0]
-    assert source["document_id"] == "test.pdf"
+    payload = response.json()
+    assert payload["grounded"] is True
+    assert payload["sources"]
+    source = payload["sources"][0]
+    assert source["document_id"] == created["document_id"]
+    assert source["document_name"] == "france.txt"
+    assert source["chunk_id"]
     assert source["page"] == 1
-    assert source["chunk_index"] == 0
-    assert "AI" in source["text_preview"]
+    assert source["citation_id"] == 1
+    assert "text_preview" in source
+    assert source["score"] >= 0
 
-def test_documents_analyze_returns_summary(monkeypatch):
-    monkeypatch.setattr(app_module, "extract_text", lambda data: "Report text")
-    monkeypatch.setattr(app_module.audit, "record", lambda *args, **kwargs: None)
 
-    async def fake_generate(model, prompt):
-        return "A short summary."
+def test_query_before_upload_returns_no_evidence(client):
+    response = client.post("/documents/query", json={"question": "What is the policy?"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"] == NO_EVIDENCE_ANSWER
+    assert payload["sources"] == []
+    assert payload["grounded"] is False
 
-    monkeypatch.setattr(app_module.llm_client, "generate", fake_generate)
 
+def test_query_rejects_blank_question(client):
+    response = client.post("/documents/query", json={"question": "   "})
+    assert response.status_code == 422
+
+
+def test_query_returns_503_when_llm_is_unavailable(client, container):
+    _upload(client, "france.txt", b"Paris is the capital of France.")
+    container.llm_client.unavailable = True
+    response = client.post("/documents/query", json={"question": "capital of France"})
+    assert response.status_code == 503
+
+
+def test_query_returns_503_when_embeddings_unavailable(client, container):
+    _upload(client, "france.txt", b"Paris is the capital of France.")
+    container.embedding_provider.unavailable = True
+    response = client.post("/documents/query", json={"question": "capital of France"})
+    assert response.status_code == 503
+
+
+def test_query_returns_503_when_vector_store_unavailable(client, container):
+    _upload(client, "france.txt", b"Paris is the capital of France.")
+    container.vector_store.unavailable = True
+    response = client.post("/documents/query", json={"question": "capital of France"})
+    assert response.status_code == 503
+
+
+def test_query_unknown_document_filter_returns_404(client):
+    _upload(client, "france.txt", b"Paris is the capital of France.")
+    response = client.post(
+        "/documents/query",
+        json={"question": "capital", "document_id": "does-not-exist"},
+    )
+    assert response.status_code == 404
+
+
+def test_analyze_document(client):
     response = client.post(
         "/documents/analyze",
-        files={"file": ("report.pdf", b"%PDF-1.4 fake", "application/pdf")},
+        files={"file": ("report.txt", b"Report text", "text/plain")},
     )
     assert response.status_code == 200
-    data = response.json()
-    assert data["summary"] == "A short summary."
-    assert data["extracted_text"] == "Report text"
+    payload = response.json()
+    assert payload["extracted_text"] == "Report text"
+    assert payload["summary"]
+    assert payload["page_count"] == 1
 
 
-def test_documents_analyze_invalid_pdf_returns_422(monkeypatch):
-    def raise_invalid(data):
-        raise InvalidPDFError("Failed to open PDF")
+def test_health_live_and_ready(client):
+    live = client.get("/health/live")
+    assert live.status_code == 200
+    assert live.json() == {"status": "live"}
 
-    monkeypatch.setattr(app_module, "extract_text", raise_invalid)
+    ready = client.get("/health/ready")
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "ready"
 
-    response = client.post(
-        "/documents/analyze",
-        files={"file": ("bad.pdf", b"not a pdf", "application/pdf")},
-    )
-    assert response.status_code == 422
+
+def test_health_ready_degraded_when_dependency_unavailable(client, container):
+    container.vector_store.unavailable = True
+    ready = client.get("/health/ready")
+    assert ready.status_code == 503
+    payload = ready.json()
+    assert payload["status"] == "degraded"
+    checks = {check["name"]: check["status"] for check in payload["checks"]}
+    assert checks["vector_store"] == "unavailable"
+
+
+def test_system_endpoints(client):
+    version = client.get("/system/version")
+    assert version.status_code == 200
+    assert version.json()["name"]
+
+    status = client.get("/system/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert "models" in body
+    assert "checks" in body
+
+    preflight = client.get("/system/preflight")
+    assert preflight.status_code == 200
+    assert "hardware" in preflight.json()
