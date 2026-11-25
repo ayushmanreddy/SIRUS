@@ -37,6 +37,7 @@ class Handler(BaseHTTPRequestHandler):
             "/": "index.html",
             "/index.html": "index.html",
             "/sirus-ui.html": "sirus-ui.html",
+            "/knowledge-desk.html": "knowledge-desk.html",
         }.get(parsed.path)
         if page:
             try:
