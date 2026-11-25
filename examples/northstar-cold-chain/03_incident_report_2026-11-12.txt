@@ -1,0 +1,41 @@
+NORTHSTAR COLD CHAIN
+Incident report: stale temperature readings | Fictional training document
+Incident date: 2026-11-12 | Reported: 2026-11-13
+
+INCIDENT SUMMARY
+
+On November 12, 2026, the dashboard showed stale temperature readings for 18
+FrostBox-80 lockers at Northstar’s Nagpur demonstration depot after the Sentinel
+monitoring application updated to version 2.8. The issue began at 09:12 and was
+resolved at 12:30, for a total duration of 3 hours and 18 minutes.
+
+No retailer inventory was affected. The depot was a training and demonstration
+site, not a live retailer location. Staff checked the local temperature
+displays during the incident. Those displays remained available, and logged
+temperatures stayed within the demonstration range.
+
+CAUSE
+
+The version 2.8 reconnect handler could refresh the connection status without
+refreshing the displayed measurement. The dashboard therefore appeared
+connected while continuing to show an older reading. The refrigeration units
+continued to operate normally; the fault affected the displayed monitoring
+data, not the cooling system.
+
+RESPONSE
+
+Dev Mehta paused the demonstration and asked depot staff to compare each local
+display with the dashboard. Leena Rao approved a rollback to Sentinel software
+version 2.7. The dashboard readings refreshed after the rollback. The team
+verified all 18 lockers before reopening the demonstration at 12:30.
+
+FOLLOW-UP ACTIONS
+
+Leena Rao owns the reconnect test for the proposed version 2.9. The test must
+confirm that a fresh measurement is displayed after a connection is restored.
+Dev Mehta owns the depot checklist requiring a local-display check during
+future dashboard outages. Kiran Shah will use the same explanation in the
+customer-support playbook if a retailer reports stale readings.
+
+The incident report does not record a monetary loss because no customer
+inventory was involved and no product was discarded.

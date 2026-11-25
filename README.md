@@ -10,6 +10,10 @@ Nothing leaves your machine. SIRUS does not train or fine-tune a model. The
 embedding model handles semantic retrieval, Qdrant stores vectors, and the local
 LLM writes an answer grounded in retrieved passage text.
 
+In short: add a PDF, text file, or Word document, ask a question, and get an
+answer with the passages it came from. Your files are not sent to a hosted AI
+service.
+
 > V1 is designed for a trusted single-user local deployment. It has **no
 > authentication**. Do not expose it to the public internet. The
 > `/agent/execute_code` endpoint executes Python in a restricted subprocess and is
@@ -22,20 +26,24 @@ LLM writes an answer grounded in retrieved passage text.
 3. [Technology stack](#technology-stack)
 4. [Prerequisites](#prerequisites)
 5. [Installation](#installation)
-6. [Environment configuration](#environment-configuration)
-7. [Ollama model setup](#ollama-model-setup)
-8. [Qdrant setup](#qdrant-setup)
-9. [Docker instructions](#docker-instructions)
-10. [Starting FastAPI natively](#starting-fastapi-natively)
-11. [API endpoints](#api-endpoints)
-12. [Example document ingestion](#example-document-ingestion)
-13. [Example question and answer](#example-question-and-answer)
-14. [Example source references](#example-source-references)
-15. [Running tests](#running-tests)
-16. [Common errors and fixes](#common-errors-and-fixes)
-17. [Current limitations](#current-limitations)
-18. [Changing the embedding model](#changing-the-embedding-model)
-19. [Project layout](#project-layout)
+6. [Quick start on Windows (four windows)](#quick-start-on-windows-four-windows)
+7. [Environment configuration](#environment-configuration)
+8. [Ollama model setup](#ollama-model-setup)
+9. [Qdrant setup](#qdrant-setup)
+10. [Docker instructions](#docker-instructions)
+11. [Starting FastAPI natively](#starting-fastapi-natively)
+12. [Website interfaces](#website-interfaces)
+13. [API endpoints](#api-endpoints)
+14. [Example document ingestion](#example-document-ingestion)
+15. [Demo files: Northstar Cold Chain](#demo-files-northstar-cold-chain)
+16. [Example question and answer](#example-question-and-answer)
+17. [Example source references](#example-source-references)
+18. [Running tests](#running-tests)
+19. [Common errors and fixes](#common-errors-and-fixes)
+20. [Current limitations](#current-limitations)
+21. [Changing the embedding model](#changing-the-embedding-model)
+22. [Project layout](#project-layout)
+23. [Documentation](#documentation)
 
 ## What SIRUS does
 
@@ -138,6 +146,47 @@ python -m pip install -r requirements-dev.txt
 `requirements.txt` contains runtime dependencies; `requirements-dev.txt` adds
 pytest tooling.
 
+## Quick start on Windows (four windows)
+
+SIRUS uses four local processes: Ollama, Qdrant, the SIRUS API, and the website
+helper. Run each in its own PowerShell window and leave it open while you use
+the app. Everything stays on `127.0.0.1`; nothing is sent to a hosted AI service.
+
+Start Ollama and Qdrant first (use the Docker command in
+[Qdrant setup](#qdrant-setup) if you do not run Qdrant natively). In Ollama, make
+sure these models are available:
+
+- Chat: `llama3.2:3b`
+- Embeddings: `nomic-embed-text`
+
+In a second window, start the SIRUS API. Activate your Python environment and set
+the local service and model names in that same window:
+
+```powershell
+$env:LLM_SERVICE_URL = "http://127.0.0.1:11434"
+$env:EMBEDDING_SERVICE_URL = "http://127.0.0.1:11434"
+$env:VECTOR_STORE_URL = "http://127.0.0.1:6333"
+$env:LLM_MODEL = "llama3.2:3b"
+$env:REASONING_MODEL = "llama3.2:3b"
+$env:EMBEDDING_MODEL = "nomic-embed-text"
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+In a third window, start the website helper from the project folder:
+
+```powershell
+python .\site\serve.py
+```
+
+Then open <http://127.0.0.1:8080> for the original interface or
+<http://127.0.0.1:8080/sirus-ui.html> for the alternate dark space-style
+interface. Both pages use the same SIRUS API. The API reference is at
+<http://127.0.0.1:8000/docs>.
+
+The website helper uses only Python's standard library and forwards requests to
+the SIRUS API on this computer. Press `Ctrl+C` in its window to stop it. Qdrant
+and SIRUS must remain running while you use either page.
+
 ## Environment configuration
 
 Copy the example file. **Never commit `.env`.**
@@ -224,6 +273,10 @@ Or use the one-shot helper (reads `LLM_MODEL` and `EMBEDDING_MODEL` from `.env`)
 docker compose --profile setup run --rm ollama-models
 ```
 
+The current local workstation setup uses `llama3.2:3b` for chat; set
+`LLM_MODEL` and `REASONING_MODEL` to `llama3.2:3b` and pull that model if you
+want to match it. The examples above use `llama3.1:8b`, which works unchanged.
+
 For a lighter machine, set `LLM_MODEL=qwen2.5:0.5b` and pull that model. Answer
 quality will be lower; the RAG pipeline is unchanged.
 
@@ -290,6 +343,30 @@ python -m uvicorn app.main:app --reload --port 8000
 The app validates configuration on import and initializes SQLite schema during
 the FastAPI lifespan. It does not contact Qdrant or Ollama at startup, so an
 offline dependency produces a degraded readiness response rather than a crash.
+
+## Website interfaces
+
+Two self-contained HTML pages are included under `site/`:
+
+| Page | URL | Description |
+| --- | --- | --- |
+| `site/index.html` | <http://127.0.0.1:8080/> | Original light interface |
+| `site/sirus-ui.html` | <http://127.0.0.1:8080/sirus-ui.html> | Alternate dark space-style interface |
+
+Both pages call the same `/api` routes and are served by `site/serve.py`, a
+standard-library proxy that listens on `127.0.0.1:8080` and forwards an explicit
+allowlist of API routes to the SIRUS backend at `127.0.0.1:8000`. The pages are
+not mounted inside FastAPI and do not use a frontend framework. The alternate
+page loads Google Fonts when available and falls back to system fonts offline; it
+makes no other external requests.
+
+Start the helper with:
+
+```powershell
+python .\site\serve.py
+```
+
+Keep its window open while using either page and press `Ctrl+C` to stop it.
 
 ## API endpoints
 
@@ -373,6 +450,18 @@ List and inspect documents:
 Invoke-RestMethod http://localhost:8000/documents
 Invoke-RestMethod http://localhost:8000/documents/<document_id>
 ```
+
+## Demo files: Northstar Cold Chain
+
+The `examples/northstar-cold-chain/` folder contains a fictional demo pack for a
+made-up business called Northstar Cold Chain. All companies, people, suppliers,
+products, incidents, and figures in these files are invented. Nothing describes
+a real business.
+
+Upload the five numbered TXT documents one at a time through the website. SIRUS
+does **not** index them automatically. `DEMO_QUESTIONS.txt` contains answerable
+questions, a cross-document question, a document-filter example, and a question
+that should make SIRUS abstain. `README.txt` describes the pack.
 
 ## Example question and answer
 
@@ -563,6 +652,12 @@ app/
   audit.py                Redacted SQLite audit events
 tests/                    Unit, API, extraction, and integration tests
 scripts/e2e_smoke.py      Live smoke test against a running API
+site/
+  index.html              Original light website interface
+  sirus-ui.html           Alternate dark space-style interface
+  serve.py                Standard-library proxy serving both pages on :8080
+examples/
+  northstar-cold-chain/   Fictional demo TXT pack (not auto-ingested)
 ```
 
 ## Documentation

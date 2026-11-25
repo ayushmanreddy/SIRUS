@@ -1,0 +1,40 @@
+NORTHSTAR COLD CHAIN
+Company profile | Fictional training document | Updated 2026-10-01
+
+Northstar Cold Chain (NCC) is a fictional Pune-based company that builds
+connected refrigerated lockers for neighborhood food shops. Its purpose is to
+help small retailers keep temperature-sensitive groceries in good condition
+without installing a full walk-in cold room. All details in this document are
+invented for a SIRUS demonstration.
+
+PRODUCT
+
+The FrostBox-80 is NCC’s modular refrigerated locker. It has an 80-litre usable
+capacity and is intended for small shops. Each FrostBox-80 can be paired with a
+Sentinel temperature monitor. The monitor sends readings to the store dashboard
+every five minutes while connected. A local temperature display remains
+available if the dashboard connection is interrupted.
+
+TEAMS AND RESPONSIBILITIES
+
+Mira Sen is the chief operating officer and chairs the weekly operations review.
+Dev Mehta leads operations and manages production scheduling and depot readiness.
+Leena Rao leads quality assurance and approves release testing for firmware and
+hardware changes. Kiran Shah leads customer support and owns retailer service
+communications. Arjun Das manages finance approvals and monthly budget reports.
+
+The operations team works from a small assembly site in Pune. A demonstration
+depot in Nagpur is used for training and product trials. These are the only
+locations used in the fictional Northstar scenario.
+
+OPERATING PRINCIPLES
+
+Northstar does not release a product change just because a lab test passed.
+Quality assurance must record the test result, operations must confirm the
+rollout plan, and customer support must have a clear response guide before a
+change is enabled for retailers.
+
+The company’s quarterly operating target is at least 95 percent on-time delivery.
+Customer support aims to acknowledge ordinary service requests within four
+business hours. The on-time delivery target is separate from the temperature
+monitor’s five-minute reporting interval.
