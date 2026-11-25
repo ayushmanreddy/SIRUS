@@ -1,0 +1,57 @@
+NORTHSTAR COLD CHAIN — DEMONSTRATION QUESTIONS
+
+All questions below refer only to the fictional files in this pack. Upload the
+five numbered company documents first. Ask across all documents unless a step
+specifically asks you to select a file in the SIRUS library.
+
+1. What does the FrostBox-80 do, and what is its capacity?
+   Expected: It is a modular refrigerated locker for small shops with 80 litres
+   of usable capacity.
+   Source: 01_company_profile.txt
+
+2. What was Northstar’s Q3 on-time delivery rate, and how did it compare with
+   the target?
+   Expected: 92.9 percent versus a 95 percent target.
+   Source: 02_q3_operations_report.txt
+
+3. Why were nine Q3 shipments late?
+   Expected: Sentinel-T4 sensors from the fictional supplier Veda Components
+   arrived eight days later than scheduled.
+   Source: 02_q3_operations_report.txt
+
+4. During the November 12 incident, how many lockers were affected, how long
+   did the issue last, and was customer inventory affected?
+   Expected: 18 lockers; 3 hours and 18 minutes; no retailer inventory was
+   affected because this was a demonstration depot.
+   Source: 03_incident_report_2026-11-12.txt
+
+5. How much of the demonstration budget remained on November 20?
+   Expected: 165,000 fictional rupees remained from a 480,000-rupee budget after
+   315,000 rupees had been spent.
+   Source: 04_decision_log_2026-11-20.txt
+
+6. What must happen before version 2.9 can be rolled out more widely?
+   Expected: A 50-unit pilot, a passing reconnect test, then seven consecutive
+   days without a stale-reading event and a go/no-go review. Automatic updates
+   remain disabled until approval.
+   Source: 04_decision_log_2026-11-20.txt
+
+7. When should support escalate a temperature concern immediately?
+   Expected: When the local display is above 8 degrees Celsius for more than
+   30 minutes.
+   Source: 05_customer_support_playbook.txt
+
+8. What is the street address of Northstar’s Pune office?
+   Expected: The documents do not provide a street address. SIRUS should say it
+   cannot find enough information rather than inventing one.
+
+OPTIONAL FILTERING DEMO
+
+Select 03_incident_report_2026-11-12.txt in the document list, then ask:
+“What caused the stale readings?” The answer should cite that incident report.
+
+OPTIONAL CROSS-DOCUMENT DEMO
+
+Ask: “How does the November incident relate to the version 2.9 decision?”
+The answer should connect the reconnect bug in the incident report with the
+pilot and release gate in the decision log.

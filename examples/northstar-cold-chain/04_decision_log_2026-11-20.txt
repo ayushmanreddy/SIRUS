@@ -1,0 +1,39 @@
+NORTHSTAR COLD CHAIN
+Operations decision log | Fictional training document | Meeting: 2026-11-20
+
+ATTENDEES
+
+Mira Sen (chair), Dev Mehta (operations), Leena Rao (quality assurance),
+Kiran Shah (customer support), and Arjun Das (finance).
+
+DECISION: SENTINEL VERSION 2.9
+
+The team approved a limited pilot of Sentinel version 2.9 on 50 FrostBox-80
+units. Leena Rao owns the release test and must record the result by
+December 5, 2026. The pilot may proceed only after the reconnect test confirms
+that the dashboard displays a fresh measurement following a lost connection.
+
+After the pilot begins, the team requires seven consecutive days without a
+stale-reading event before it considers a wider rollout. Mira Sen will chair
+that go/no-go review. Automatic updates must remain disabled until the review
+approves expansion.
+
+DECISION: SENSOR INVENTORY BUFFER
+
+The temporary two-week Sentinel-T4 sensor buffer from the Q3 operations report
+will remain in place through December. Arjun Das will compare the extra
+inventory cost with supplier delivery performance at the December finance
+review. The team did not approve a permanent buffer.
+
+DEMO BUDGET
+
+The training and demonstration program has an approved budget of 480,000
+fictional rupees. At the November 20 meeting, recorded spending was 315,000
+rupees, leaving 165,000 rupees. Arjun Das owns the monthly spending update.
+This budget applies to training and demonstrations, not to production
+inventory or retailer reimbursements.
+
+OPEN ITEMS
+
+The meeting did not set a 2027 sales target, a public launch date for version
+2.9, or a permanent sensor-inventory policy. Those decisions remain open.

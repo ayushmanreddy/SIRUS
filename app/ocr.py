@@ -1,40 +1,117 @@
 from __future__ import annotations
 
 import logging
+import threading
+from dataclasses import dataclass
 from typing import Optional
 
-logger = logging.getLogger("sovereign_workbench.ocr")
+logger = logging.getLogger("sirus.ocr")
 
 _reader: Optional["easyocr.Reader"] = None
-
-
-def _get_reader() -> "easyocr.Reader":
-    global _reader
-    if _reader is None:
-        import easyocr
-        import torch
-        gpu = torch.cuda.is_available()
-        logger.info("Initializing easyocr.Reader with gpu=%s", gpu)
-        _reader = easyocr.Reader(["en"], gpu=gpu)
-    return _reader
+_reader_lock = threading.Lock()
+_reader_languages: tuple[str, ...] | None = None
 
 
 class InvalidPDFError(Exception):
     """Raised when a PDF cannot be parsed by PyMuPDF."""
 
 
-def render_pdf_pages(pdf_bytes: bytes) -> list[bytes]:
-    """Render each page of a PDF as PNG bytes using PyMuPDF (fitz).
+class PDFPageLimitError(InvalidPDFError):
+    """Raised when a PDF exceeds the configured page limit."""
 
-    Args:
-        pdf_bytes: Raw PDF file bytes.
 
-    Returns:
-        List of PNG byte chunks, one per page.
+class OCRExtractionError(Exception):
+    """Raised when OCR is required but cannot run."""
 
-    Raises:
-        ImportError: If PyMuPDF (fitz) is not installed.
-        InvalidPDFError: If the PDF cannot be opened.
+
+@dataclass(frozen=True)
+class PDFPageText:
+    page_number: int
+    text: str
+    method: str
+
+
+def _get_reader(languages: list[str] | None = None) -> "easyocr.Reader":
+    """Return a lazily initialized EasyOCR reader.
+
+    EasyOCR downloads model weights on first use. For offline deployments,
+    initialize the reader once with network access and keep the cache, or mount
+    a pre-populated EasyOCR model directory.
+    """
+    global _reader, _reader_languages
+    requested = tuple(languages or ["en"])
+    with _reader_lock:
+        if _reader is None or _reader_languages != requested:
+            try:
+                import easyocr
+                import torch
+
+                gpu = torch.cuda.is_available()
+                logger.info("Initializing easyocr.Reader languages=%s gpu=%s", requested, gpu)
+                _reader = easyocr.Reader(list(requested), gpu=gpu)
+                _reader_languages = requested
+            except Exception as error:  # noqa: BLE001 - normalized into a domain error
+                logger.error("EasyOCR initialization failed: %s", error)
+                raise OCRExtractionError("OCR is unavailable because EasyOCR could not be initialized.") from error
+        return _reader
+
+
+def render_pdf_pages(pdf_bytes: bytes, dpi: int = 200) -> list[bytes]:
+    """Render each PDF page as PNG bytes (kept for the existing analysis flow)."""
+    import fitz
+
+    try:
+        document = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as error:
+        raise InvalidPDFError("Failed to open PDF") from error
+    try:
+        pages: list[bytes] = []
+        scale = dpi / 72.0
+        matrix = fitz.Matrix(scale, scale)
+        for page_number in range(len(document)):
+            pixmap = document[page_number].get_pixmap(matrix=matrix)
+            pages.append(pixmap.tobytes("png"))
+        return pages
+    finally:
+        document.close()
+
+
+def ocr_png_bytes(png_bytes: bytes, languages: list[str] | None = None) -> str:
+    """Run OCR on PNG bytes and return newline-joined text."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as error:
+        raise OCRExtractionError("OpenCV/numpy are required for OCR.") from error
+
+    image_np = np.frombuffer(png_bytes, dtype=np.uint8)
+    image_bgr = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+    if image_bgr is None:
+        raise OCRExtractionError("The rendered PDF page could not be decoded.")
+    try:
+        results = _get_reader(languages).readtext(image_bgr, detail=0)
+    except OCRExtractionError:
+        raise
+    except Exception as error:  # noqa: BLE001
+        logger.error("OCR failed: %s", error)
+        raise OCRExtractionError("OCR failed while reading a document page.") from error
+    return "\n".join(str(item) for item in results if str(item).strip())
+
+
+def extract_pdf_pages(
+    pdf_bytes: bytes,
+    *,
+    ocr_enabled: bool = True,
+    languages: list[str] | None = None,
+    dpi: int = 200,
+    min_native_chars: int = 40,
+    max_pages: int | None = None,
+) -> list[PDFPageText]:
+    """Extract per-page text from a PDF.
+
+    Native embedded text is preferred because it is exact and fast. OCR is a
+    fallback only for pages with little or no digital text (for example scans).
+    This avoids paying OCR cost for normal PDFs and preserves page numbers.
     """
     import fitz
 
@@ -42,47 +119,43 @@ def render_pdf_pages(pdf_bytes: bytes) -> list[bytes]:
         document = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as error:
         raise InvalidPDFError("Failed to open PDF") from error
-    pages: list[bytes] = []
-    for page_num in range(len(document)):
-        page = document[page_num]
-        pixmap = page.get_pixmap()
-        pages.append(pixmap.tobytes("png"))
-    document.close()
-    return pages
+
+    try:
+        if max_pages is not None and len(document) > max_pages:
+            raise PDFPageLimitError(f"PDF has more than the allowed {max_pages} pages.")
+
+        pages: list[PDFPageText] = []
+        scale = dpi / 72.0
+        matrix = fitz.Matrix(scale, scale)
+
+        for index in range(len(document)):
+            page_number = index + 1
+            page = document[index]
+            native_text = (page.get_text("text") or "").strip()
+            if len(native_text) >= min_native_chars:
+                pages.append(PDFPageText(page_number, native_text, "native"))
+                continue
+
+            if not ocr_enabled:
+                pages.append(PDFPageText(page_number, native_text, "native-partial"))
+                continue
+
+            pixmap = page.get_pixmap(matrix=matrix)
+            ocr_text = ocr_png_bytes(pixmap.tobytes("png"), languages)
+            if ocr_text.strip():
+                pages.append(PDFPageText(page_number, ocr_text, "ocr"))
+            else:
+                pages.append(PDFPageText(page_number, native_text, "native-partial"))
+
+        return pages
+    finally:
+        document.close()
 
 
 def extract_text(pdf_bytes: bytes) -> str:
-    """Extract text from PDF pages using easyocr.
+    """Extract concatenated PDF text (native text first, OCR fallback).
 
-    Args:
-        pdf_bytes: Raw PDF file bytes.
-
-    Returns:
-        Concatenated text from all pages, with page breaks indicated by double newlines.
-
-    Raises:
-        ImportError: If easyocr is not installed.
-        InvalidPDFError: If the PDF cannot be opened.
+    Retained for the document-analysis endpoint and existing callers.
     """
-    import fitz
-
-    try:
-        document = fitz.open(stream=pdf_bytes, filetype="pdf")
-    except Exception as error:
-        raise InvalidPDFError("Failed to open PDF") from error
-
-    all_text: list[str] = []
-    for page_num in range(len(document)):
-        page = document[page_num]
-        pixmap = page.get_pixmap()
-        image_bytes = pixmap.tobytes("png")
-        import cv2
-        import numpy as np
-        image_np = np.frombuffer(image_bytes, dtype=np.uint8)
-        image_bgr = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
-        from app.ocr import _get_reader
-        results = _get_reader().readtext(image_bgr, detail=0)
-        page_text = "\n".join(results)
-        all_text.append(page_text)
-    document.close()
-    return "\n\n".join(all_text)
+    pages = extract_pdf_pages(pdf_bytes)
+    return "\n\n".join(page.text for page in pages)

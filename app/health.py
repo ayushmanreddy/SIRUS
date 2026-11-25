@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import asyncio
+import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
-
 from app.config import Settings
+from app.dependencies import AppContainer
+
+logger = logging.getLogger("sirus.health")
 
 
 @dataclass
@@ -18,36 +19,63 @@ class CheckResult:
     detail: str
 
 
-async def check_http_service(name: str, endpoint: str, timeout: float) -> CheckResult:
+def _database_check(settings: Settings) -> CheckResult:
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(endpoint)
-        if response.status_code < 500:
-            return CheckResult(name, "ready", "reachable")
-        return CheckResult(name, "unavailable", "service returned an error")
-    except (httpx.HTTPError, ValueError):
-        return CheckResult(name, "unavailable", "not reachable")
-
-
-def check_database(settings: Settings) -> CheckResult:
-    try:
-        path = Path(settings.database_url.removeprefix("sqlite:///"))
+        path = Path(settings.database_path)
         with sqlite3.connect(path) as connection:
-            connection.execute("SELECT 1 FROM audit_events LIMIT 1")
-        return CheckResult("database", "ready", "migration available")
-    except sqlite3.Error:
-        return CheckResult("database", "unavailable", "migration missing or database unavailable")
+            rows = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('audit_events','documents')"
+            ).fetchall()
+        present = {row[0] for row in rows}
+        if {"audit_events", "documents"} <= present:
+            return CheckResult("database", "ready", "schema available")
+        return CheckResult("database", "unavailable", "database schema is not initialized")
+    except (sqlite3.Error, ValueError):
+        return CheckResult("database", "unavailable", "database unavailable")
 
 
-async def readiness(settings: Settings) -> list[CheckResult]:
-    vector_health = f"{settings.vector_store_url}/healthz"
-    # A generic root reachability check permits different local LLM/embedding serving runtimes.
-    checks = await asyncio.gather(
-        check_http_service("llm", settings.llm_service_url, settings.request_timeout_seconds),
-        check_http_service("embeddings", settings.embedding_service_url, settings.request_timeout_seconds),
-        check_http_service("vector_store", vector_health, settings.request_timeout_seconds),
+async def readiness(settings: Settings, container: AppContainer) -> list[CheckResult]:
+    """Check process dependencies, including whether required models are installed.
+
+    A reachable Ollama process is not the same as a usable model. Embedding and
+    LLM health checks inspect ``/api/tags`` so readiness cannot claim success
+    when the configured model has not been pulled.
+    """
+    database = _database_check(settings)
+
+    vector = await container.vector_store.health()
+    vector_ready = vector.get("status") == "healthy"
+    vector_check = CheckResult(
+        "vector_store",
+        "ready" if vector_ready else "unavailable",
+        "reachable" if vector_ready else str(vector.get("detail", "unavailable")),
     )
-    return [check_database(settings), *checks]
+
+    embedding = await container.embedding_provider.health()
+    embedding_ready = embedding.get("status") == "healthy"
+    embedding_check = CheckResult(
+        "embeddings",
+        "ready" if embedding_ready else "unavailable",
+        (
+            f"model '{settings.embedding_model}' available"
+            if embedding_ready
+            else str(embedding.get("detail", "embedding service unavailable"))
+        ),
+    )
+
+    llm = await container.llm_client.health(required_model=settings.answer_model)
+    llm_ready = llm.get("status") == "healthy"
+    llm_check = CheckResult(
+        "llm",
+        "ready" if llm_ready else "unavailable",
+        (
+            f"model '{settings.answer_model}' available"
+            if llm_ready
+            else str(llm.get("detail", "model service unavailable"))
+        ),
+    )
+
+    return [database, vector_check, embedding_check, llm_check]
 
 
 def endpoint_host(endpoint: str) -> str:

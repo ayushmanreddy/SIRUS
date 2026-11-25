@@ -1,0 +1,42 @@
+NORTHSTAR COLD CHAIN
+Q3 2026 operations report | Fictional training document | Issued 2026-10-08
+
+SUMMARY
+
+During Q3 2026, Northstar Cold Chain shipped 126 FrostBox-80 lockers. 117
+shipments arrived by their committed dates and 9 arrived late, giving an
+on-time delivery rate of 92.9 percent. The quarterly target was 95 percent.
+Three units were returned for inspection, a return rate of 2.4 percent of
+shipments. No return was classified as a food-safety event.
+
+The report covers July 1 through September 30, 2026. Figures are fictional and
+were created solely to demonstrate document retrieval.
+
+DELIVERY DELAYS
+
+The nine late shipments were held up by a delayed delivery of Sentinel-T4
+temperature sensors from the fictional supplier Veda Components. The shipment
+was eight days later than the purchase order date. Operations used available
+stock to complete the first scheduled customer orders, then revised delivery
+dates for the remaining orders. The delay did not change the FrostBox-80
+refrigeration design.
+
+CORRECTIVE ACTIONS
+
+Dev Mehta will maintain a two-week buffer for Sentinel-T4 sensors during the
+next production cycle. Arjun Das will review the carrying cost at the November
+monthly finance meeting. The buffer should be reduced if supplier delivery
+reliability returns to the agreed schedule for two consecutive months.
+
+QUALITY AND SERVICE
+
+Leena Rao’s team inspected all three returned units. Two had damaged door
+seals from handling in transit; one had a loose temperature-monitor connector.
+All three units were repaired and returned to service. Kiran Shah updated the
+packing checklist to include a seal inspection before dispatch.
+
+DECISION NEEDED
+
+The operations review asked whether the sensor buffer should become permanent.
+No permanent inventory policy was approved in Q3. The temporary two-week buffer
+remains in place until the November finance review.

@@ -1,13 +1,8 @@
-"""Vector store abstraction for the Sovereign AI Workbench.
+"""Vector store abstraction for SIRUS.
 
-Defines the interface for local vector database operations. Supports
-collections, vector insertion, similarity search, metadata, deletion,
-and persistence. Designed to be implemented by Qdrant (current) or
-future local vector stores.
-
-The abstraction ensures the application is not tightly coupled to one
-vector database technology, allowing future replacement without rewriting
-the entire RAG pipeline.
+The interface keeps the RAG pipeline independent of the Qdrant REST details.
+Qdrant is the only V1 implementation; future local vector stores can implement
+the same contract without rewriting ingestion or retrieval.
 """
 from __future__ import annotations
 
@@ -15,9 +10,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-import numpy as np
-
-logger = logging.getLogger("sovereign_workbench.vector_store")
+logger = logging.getLogger("sirus.vector_store")
 
 
 class VectorStoreMetadata:
@@ -30,6 +23,8 @@ class VectorStoreMetadata:
         source_document: str,
         page_number: int | None = None,
         chunk_index: int | None = None,
+        document_id: str | None = None,
+        chunk_id: str | None = None,
         **extra: Any,
     ) -> None:
         self.id = id
@@ -37,17 +32,22 @@ class VectorStoreMetadata:
         self.source_document = source_document
         self.page_number = page_number
         self.chunk_index = chunk_index
+        self.document_id = document_id
+        self.chunk_id = chunk_id
         self.extra = extra
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "id": self.id,
             "content": self.content,
             "source_document": self.source_document,
             "page_number": self.page_number,
             "chunk_index": self.chunk_index,
+            "document_id": self.document_id,
+            "chunk_id": self.chunk_id,
             **self.extra,
         }
+        return {key: value for key, value in payload.items() if value is not None}
 
 
 class VectorStoreSearchResult:
@@ -97,6 +97,14 @@ class VectorStoreInterface(ABC):
         """Insert a vector into a collection. Returns the vector ID."""
 
     @abstractmethod
+    async def upsert_points(
+        self,
+        collection_name: str,
+        points: List[Dict[str, Any]],
+    ) -> None:
+        """Insert or replace points in one or more batched requests."""
+
+    @abstractmethod
     async def similarity_search(
         self,
         collection_name: str,
@@ -115,6 +123,10 @@ class VectorStoreInterface(ABC):
         """Delete a vector from a collection."""
 
     @abstractmethod
+    async def delete_points(self, collection_name: str, vector_ids: List[str]) -> None:
+        """Delete several vectors from a collection."""
+
+    @abstractmethod
     async def delete_collection(self, collection_name: str) -> None:
         """Delete an entire collection."""
 
@@ -125,3 +137,6 @@ class VectorStoreInterface(ABC):
     @abstractmethod
     async def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
         """Get information about a specific collection."""
+
+    async def close(self) -> None:
+        """Release network resources. Implementations may override."""

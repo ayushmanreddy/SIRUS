@@ -2,10 +2,8 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic-settings==2.7.1
 httpx==0.28.1
-numpy>=1.26.0
-pytest>=8.4,<10
+numpy>=1.26,<3
 pymupdf==1.28.2
 easyocr==1.7.2
-pytest-asyncio==1.4.1.post1
-python-multipart
-
+python-multipart>=0.0.20
+python-docx==1.1.2

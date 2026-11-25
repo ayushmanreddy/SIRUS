@@ -1,38 +1,102 @@
 # Local runbook
 
-## Normal startup
+## 1. Start the stack
 
-1. Copy `.env.example` to `.env`.
-2. For an offline proof, set `APP_PROFILE=offline-demo` and use only local/private endpoints.
-3. Start `docker compose up --build`.
-4. Verify `/health/live`, then `/health/ready`, then `/system/status`.
-5. Call `GET /system/preflight` — verify all model artifacts are ready before proceeding.
+```powershell
+Copy-Item .env.example .env
 
-## Expected foundation state
+# Docker path (Qdrant + Ollama + API)
+docker compose up --build -d
+docker compose --profile setup run --rm ollama-models
+```
 
-- Qdrant should show ready. LLM and embedding services will remain unavailable until local runtimes (Ollama with approved model, local embedding model) are started and model artifacts verify successfully. This is expected; do not describe the platform as fully ready before these services are connected.
-- `GET /system/status` will show profile, uptime, service hosts, and checks.
-- `GET /system/preflight` will show `status: "ready"` if all SHA-256 checksums match.
+`ollama-models` pulls `LLM_MODEL` and `EMBEDDING_MODEL` from `.env`. Pulling is a
+separate step; a running Ollama container does not include models.
+
+Alternative if Ollama is installed on the host:
+
+```powershell
+ollama pull nomic-embed-text
+ollama pull llama3.1:8b
+# .env: LLM/EMBEDDING_SERVICE_URL=http://host.docker.internal:11434
+```
+
+## 2. Verify readiness in order
+
+```powershell
+Invoke-RestMethod http://localhost:8000/health/live
+Invoke-RestMethod http://localhost:8000/health/ready
+Invoke-RestMethod http://localhost:8000/system/status
+```
+
+`/health/ready` is 200 only when:
+
+- SQLite contains the registry and audit tables.
+- Qdrant `/healthz` responds.
+- Ollama lists the configured embedding model.
+- Ollama lists the configured LLM model.
+
+A 503 with a descriptive check is expected before models are pulled. Do not
+report the system as ready merely because the container is running.
+
+## 3. End-to-end smoke test
+
+```powershell
+python scripts/e2e_smoke.py --base-url http://localhost:8000
+```
+
+Or:
+
+```powershell
+$env:SIRUS_INTEGRATION="1"
+python -m pytest tests/integration -v
+```
+
+The smoke script uploads a unique text document, asks a grounded question,
+checks structured citations, and verifies an unrelated question is refused.
+
+## 4. Check persistence
+
+- `workbench-data` → `/app/data/workbench.db` (registry + audit).
+- `qdrant-data` → `/qdrant/storage`.
+- `ollama-data` → `/root/.ollama` (models).
+
+Back up both named volumes before a destructive migration.
 
 ## Recovery
 
-- **Database unavailable:** retain the `workbench-data` volume, inspect container logs, then restart the API.
-- **Vector store unavailable:** check the `qdrant` container and its persistent volume; do not delete a volume containing real demo data without an approved backup/reset plan.
-- **LLM/embedding unavailable:** confirm the local Ollama runtime is started and its address is configured (`LLM_SERVICE_URL`), model artifacts exist locally with matching checksums, and the model is loaded. Do not substitute a hosted endpoint in `offline-demo`.
-- **Embedding unavailable:** confirm the local embedding runtime is started and its address is configured (`EMBEDDING_SERVICE_URL`), or that the `LocalEmbeddingProvider` fallback is active.
-- **Model artifacts unavailable:** verify the `models/manifest.json` file exists and all SHA-256 checksums match. Place approved model files in the `models/` directory.
+| Problem | Action |
+| --- | --- |
+| Readiness reports embedding model missing | `ollama pull <EMBEDDING_MODEL>` |
+| Readiness reports LLM model missing | `ollama pull <LLM_MODEL>` |
+| Qdrant unavailable | Inspect `docker compose logs qdrant`; do not delete volumes with data |
+| API cannot reach Ollama | Fix `LLM_SERVICE_URL`; Compose uses `http://ollama:11434` |
+| 409 collection incompatibility | Use a new `QDRANT_COLLECTION` and re-ingest, or follow the README rebuild procedure |
+| OCR slow / unavailable on first scan | Run an OCR PDF once online to cache EasyOCR weights; check `OCR_ENABLED` |
+| Duplicate upload skipped | Expected idempotency based on SHA-256 + model + collection |
 
-## Offline demonstration checklist
+## Embedding model change
 
-1. Place approved model artifacts on the demo machine before disconnecting it.
-2. Set `APP_PROFILE=offline-demo` and point all AI service URLs to loopback/internal addresses (e.g., `LLM_SERVICE_URL=http://127.0.0.1:8081`, `EMBEDDING_SERVICE_URL=http://localhost:8082`, `VECTOR_STORE_URL=http://192.168.1.20:6333`).
-3. Start the stack: `docker compose up --build`.
-4. Verify `/health/live` returns `{"status":"live"}`.
-5. Verify `/health/ready` — some checks may report `degraded` if local runtimes aren't fully connected yet; this is expected.
-6. Call `GET /system/status` — verify all service hosts are reachable.
-7. Call `GET /system/preflight` — artifacts should report `status: "ready"` if all checksums match.
-8. Disable external networking and run the health checks again.
-9. Record the result. The status endpoint intentionally avoids exposing secrets and file paths.
-10. Verify that no external AI APIs are invoked (check container network traffic if needed).
+Changing `EMBEDDING_MODEL` invalidates old vectors even if dimensions match.
+SIRUS refuses to mix models in one collection. The safe procedure is:
 
-Model weights, credentials, source download URLs, prompts, and confidential documents stay out of Git.
+1. Pull the new model.
+2. Set the new `EMBEDDING_MODEL`.
+3. Set a new `QDRANT_COLLECTION` name.
+4. Restart and re-ingest documents.
+
+Old data remains available for rollback. Deleting a collection while keeping the
+SQLite registry rows would cause duplicates to be skipped, so never do a partial
+destructive reset.
+
+## Before declaring a demo complete
+
+1. `/health/live` → 200.
+2. `/health/ready` → 200 with all four checks `ready`.
+3. Upload a real PDF/TXT/DOCX.
+4. List documents and inspect the returned chunk metadata.
+5. Ask a question answerable from the document.
+6. Verify `grounded: true` and non-empty sources with real chunk IDs and scores.
+7. Ask an unrelated question.
+8. Verify `grounded: false` and the fixed no-evidence answer.
+9. Confirm audit events exist in SQLite and contain no document/prompt text.

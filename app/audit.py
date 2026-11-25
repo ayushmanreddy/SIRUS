@@ -4,9 +4,10 @@ import json
 import logging
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 SENSITIVE_KEYS = {"authorization", "token", "secret", "password", "api_key", "prompt", "document", "content"}
 
@@ -27,9 +28,21 @@ class AuditStore:
             raise ValueError("Foundation MVP supports a local SQLite database only")
         self.path = Path(database_url.removeprefix("sqlite:///"))
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.path, timeout=10)
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as connection:
+        with self._connection() as connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS audit_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +55,7 @@ class AuditStore:
 
     def record(self, event_name: str, correlation_id: str | None, payload: dict[str, Any]) -> None:
         safe_payload = json.dumps(redact(payload), sort_keys=True, default=str)
-        with sqlite3.connect(self.path) as connection:
+        with self._connection() as connection:
             connection.execute(
                 "INSERT INTO audit_events (occurred_at, event_name, correlation_id, payload_json) VALUES (?, ?, ?, ?)",
                 (datetime.now(UTC).isoformat(), event_name, correlation_id, safe_payload),
